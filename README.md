@@ -1,5 +1,5 @@
 
-# Viessmann™ Vitotrol™ device to influx DB
+# Viessmann™ Vitotrol™ device to MQTT
 
 Typically used to send Viessmann™ Vitotrol™ boiler data to a MQTT broker
 
