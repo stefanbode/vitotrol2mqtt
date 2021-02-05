@@ -7,10 +7,12 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-type ConfigInflux struct {
+type ConfigMQTT struct {
 	Login    string `yaml:"login"`
 	Password string `yaml:"password"`
-	Address  string `yaml:"address"`
+	Broker   string `yaml:"broker"`
+	Port     string `yaml:"port"`
+	ClientID string `yaml:"client_id"`
 }
 
 type ConfigVitotrol struct {
@@ -35,7 +37,7 @@ type ConfigDevice struct {
 }
 
 type Config struct {
-	Influx   ConfigInflux    `yaml:"influx"`
+	MQTT     ConfigMQTT      `yaml:"mqtt"`
 	Vitotrol ConfigVitotrol  `yaml:"vitotrol"`
 	Devices  []*ConfigDevice `yaml:"devices"`
 }

@@ -1,8 +1,10 @@
 ---
-influx:
-  login: INFLUX_USER
-  password: INFLUX_PASSWORD
-  address: http://localhost:8086
+mqtt:
+  login: MQTT_USER
+  password: MQTT_PASSWORD
+  broker: BROKER_URL
+  port: 1883
+  client_id: vitotrol2mqtt
 vitotrol:
   login: VITOTROL_USER
   password: VITOTROL_PASSWORD
@@ -11,15 +13,6 @@ vitotrol:
 devices:
   - name: '*'
     location: '*'
-    database: INFLUX_DB
-    precision: s
-    retention_policy: RETENTION_POLICY # optional
-    write_consistency: WRITE_CONSISTENCY # optional
-    measurement: MEASUREMENT
-    # "tags" is optional, if missing defaults to device:name + location:location
-    tags:
-      tagName1: tagValue1
-      tagName2: tagValue2
     fields:
       - IndoorTemp
       - OutdoorTemp

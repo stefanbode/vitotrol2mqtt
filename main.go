@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -8,9 +9,21 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/influxdata/influxdb/client/v2"
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/maxatome/go-vitotrol"
 )
+
+var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
+	fmt.Printf("Received message: %s from topic: %s\n", msg.Payload(), msg.Topic())
+}
+
+var connectHandler mqtt.OnConnectHandler = func(client mqtt.Client) {
+	fmt.Println("Connected")
+}
+
+var connectLostHandler mqtt.ConnectionLostHandler = func(client mqtt.Client, err error) {
+	fmt.Printf("Connect lost: %v", err)
+}
 
 func VitotrolInit(vconf *ConfigVitotrol) *vitotrol.Session {
 	var err error
@@ -58,11 +71,9 @@ func getAttrValue(vdev *vitotrol.Device, attrID vitotrol.AttrID) (value interfac
 var customAttr = regexp.MustCompile(
 	`^([a-zA-Z0-9]+)[-_]0x([a-fA-F0-9]{1,4})\z`)
 
-func handleDevices(conf *Config, pVitotrol *vitotrol.Session, influx client.Client) bool {
-	atLeastOneOK := false
-	for _, vdev := range pVitotrol.Devices {
-		start := time.Now()
+func handleDevices(conf *Config, pVitotrol *vitotrol.Session, mqttClient mqtt.Client) bool {
 
+	for _, vdev := range pVitotrol.Devices {
 		if !vdev.IsConnected {
 			continue
 		}
@@ -79,26 +90,10 @@ func handleDevices(conf *Config, pVitotrol *vitotrol.Session, influx client.Clie
 			continue
 		}
 
-		atLeastOneOK = true
-
-		// Create a new point batch
-		bp, err := client.NewBatchPoints(client.BatchPointsConfig{
-			Database:         cdev.Database,
-			Precision:        cdev.Precision,
-			RetentionPolicy:  cdev.RetentionPolicy,
-			WriteConsistency: cdev.WriteConsistency,
-		})
-		if err != nil {
-			fmt.Printf("influx.NewBatchPoints failed: %s\n", err)
-			os.Exit(1)
-		}
-
 		if err = <-ch; err != nil {
 			fmt.Fprintf(os.Stderr, "RefreshData failed: %s\n", err)
 			continue
 		}
-
-		now := time.Now()
 
 		err = vdev.GetData(pVitotrol, cdev.attrs)
 		if err != nil {
@@ -118,39 +113,16 @@ func handleDevices(conf *Config, pVitotrol *vitotrol.Session, influx client.Clie
 			fields[fieldName] = computedAttrs[fieldName].Compute(&vdev)
 		}
 
-		// If no tags are configured, use defaults
-		tags := cdev.Tags
-		if len(tags) == 0 {
-			tags = map[string]string{
-				"device":   vdev.DeviceName,
-				"location": vdev.LocationName,
-			}
-		}
-
-		point, err := client.NewPoint(cdev.Measurement, tags, fields, now)
-		if err != nil {
-			fmt.Printf("influx.NewPoint failed: %s\n", err)
-			os.Exit(1)
-		}
-
-		bp.AddPoint(point)
-
-		fmt.Printf("%s %s → writing batch...\n",
-			now.Format(time.RFC3339),
-			now.Sub(start).Truncate(time.Millisecond),
-		)
-
 		// Write the batch
-		err = influx.Write(bp)
-		if err != nil {
-			fmt.Printf("influx.Write failed: %s\n", err)
-			os.Exit(1)
-		}
+		jsonString, _ := json.Marshal(fields)
+		token := mqttClient.Publish("vitotrol/test", 0, true, jsonString)
+		token.Wait()
 
 		time.Sleep(time.Duration(conf.Vitotrol.Frequency) * time.Second)
+
 	}
 
-	return atLeastOneOK
+	return true
 }
 
 func main() {
@@ -217,15 +189,18 @@ func main() {
 		}
 	}
 
-	// Create a new Client
-	influx, err := client.NewHTTPClient(client.HTTPConfig{
-		Addr:     conf.Influx.Address,
-		Username: conf.Influx.Login,
-		Password: conf.Influx.Password,
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Influx new client failed: %s\n", err)
-		os.Exit(1)
+	// Create a new MQTT Client
+	opts := mqtt.NewClientOptions()
+	opts.AddBroker("tcp://192.168.3.250:1883")
+	opts.SetClientID(conf.MQTT.ClientID)
+	opts.SetUsername(conf.MQTT.Login)
+	opts.SetPassword(conf.MQTT.Password)
+	opts.SetDefaultPublishHandler(messagePubHandler)
+	opts.OnConnect = connectHandler
+	opts.OnConnectionLost = connectLostHandler
+	mqttClient := mqtt.NewClient(opts)
+	if token := mqttClient.Connect(); token.Wait() && token.Error() != nil {
+		panic(token.Error())
 	}
 
 newVitotrol:
@@ -233,8 +208,8 @@ newVitotrol:
 		pVitotrol := VitotrolInit(&conf.Vitotrol)
 
 		for {
-			if !handleDevices(conf, pVitotrol, influx) {
-				time.Sleep(time.Duration(30 * time.Second))
+			if !handleDevices(conf, pVitotrol, mqttClient) {
+				time.Sleep(time.Duration(conf.Vitotrol.RetryTimeout) * time.Second)
 				continue newVitotrol
 			}
 		}
