@@ -1,26 +1,23 @@
-This respository is based on maxatome/vitotrol2influx, but instead of writing to influx, it sends the data to a mqtt broker
 
 # Viessmann™ Vitotrol™ device to influx DB
 
-Typically used to inject Viessmann™ Vitotrol™ boiler data into Influx
-database.
+Typically used to send Viessmann™ Vitotrol™ boiler data to a MQTT broker
 
 ## Installation
 
-go 1.11 is needed to correctly handle dependencies.
 
 ```sh
 go build -v
 ```
 
-will generate a `vitotrol2influx` executable.
+will generate a `vitotrol2mqtt` executable.
 
 
 ## Usage
 
 Create a YAML file based on
-[`vitotrol2influx.yml`](vitotrol2influx.yml), including your
-credentials and the attributes you want to store in InfluxDB.
+[`vitotrol2mqtt.yml`](vitotrol2mqtt.yml), including your
+credentials and the attributes you want to send to the MQTT broker.
 
 Registered attributes can be found here:
 https://github.com/maxatome/go-vitotrol/blob/master/attributes.go#L79
@@ -43,17 +40,10 @@ Note that you can provide the special attribute
 others and corresponds to the setpoint temperature (as it appears that
 this value is not available in Vitotrol™ served attributes).
 
-Once your `vitotrol2influx.yml` is ready, you can launch:
+Once your `vitotrol2mqtt.yml` is ready, you can launch:
 
 ```sh
-vitotrol2influx -config vitotrol2influx.yml
+vitotrol2mqtt -config vitotrol2mqtt.yml
 ```
 
 That's all.
-
-
-## Future
-
-I will add a (very) simple REST API to serve cached values and so
-avoid the huge amount of time needed to retrieve them from the
-Vitotrol™ web service.
