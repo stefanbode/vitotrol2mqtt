@@ -68,7 +68,7 @@ func getAttrValue(vdev *vitotrol.Device, attrID vitotrol.AttrID) (value interfac
 }
 
 var customAttr = regexp.MustCompile(
-	`^([a-zA-Z0-9]+)[-_]0x([a-fA-F0-9]{1,4})\z`)
+	`^([a-zA-Z0-9_]+)[-_]0x([a-fA-F0-9]{1,4})\z`)
 
 func handleDevices(conf *Config, pVitotrol *vitotrol.Session, mqttClient mqtt.Client) bool {
 
