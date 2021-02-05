@@ -1,3 +1,5 @@
+This respository is based on maxatome/vitotrol2influx, but instead of writing to influx, it sends the data to a mqtt broker
+
 # Viessmann™ Vitotrol™ device to influx DB
 
 Typically used to inject Viessmann™ Vitotrol™ boiler data into Influx
