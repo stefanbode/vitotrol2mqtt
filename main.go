@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -74,6 +73,9 @@ var customAttr = regexp.MustCompile(
 func handleDevices(conf *Config, pVitotrol *vitotrol.Session, mqttClient mqtt.Client) bool {
 
 	for _, vdev := range pVitotrol.Devices {
+
+		fmt.Fprintf(os.Stderr, "Refreshing data for device: %s\n", vdev.DeviceName)
+
 		if !vdev.IsConnected {
 			continue
 		}
@@ -114,9 +116,11 @@ func handleDevices(conf *Config, pVitotrol *vitotrol.Session, mqttClient mqtt.Cl
 		}
 
 		// Write the batch
-		jsonString, _ := json.Marshal(fields)
-		token := mqttClient.Publish("vitotrol/test", 0, true, jsonString)
-		token.Wait()
+		for key, element := range fields {
+			fmt.Fprintf(os.Stderr, "sending to topic: %s - value: %s\n", conf.MQTT.Topic+"/"+vdev.DeviceName+"/"+key, fmt.Sprint(element))
+			token := mqttClient.Publish(conf.MQTT.Topic+"/"+vdev.DeviceName+"/"+key, 0, true, fmt.Sprint(element))
+			token.Wait()
+		}
 
 		time.Sleep(time.Duration(conf.Vitotrol.Frequency) * time.Second)
 

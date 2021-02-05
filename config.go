@@ -13,6 +13,7 @@ type ConfigMQTT struct {
 	Broker   string `yaml:"broker"`
 	Port     string `yaml:"port"`
 	ClientID string `yaml:"client_id"`
+	Topic    string `yaml:"topic"`
 }
 
 type ConfigVitotrol struct {
