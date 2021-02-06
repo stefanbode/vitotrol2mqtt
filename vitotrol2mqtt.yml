@@ -5,7 +5,7 @@ mqtt:
   broker: BROKER_URL
   port: 1883
   client_id: vitotrol2mqtt
-  topic: homeassistant/sensor
+  topic: vitotrol2mqtt
 vitotrol:
   login: VITOTROL_USER
   password: VITOTROL_PASSWORD
