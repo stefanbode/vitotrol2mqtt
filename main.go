@@ -117,7 +117,6 @@ func handleDevices(conf *Config, pVitotrol *vitotrol.Session, mqttClient mqtt.Cl
 
 		// Write the batch
 		for key, element := range fields {
-			fmt.Fprintf(os.Stderr, "sending to topic: %s - value: %s\n", conf.MQTT.Topic+"/"+vdev.DeviceName+"/"+key, fmt.Sprint(element))
 			token := mqttClient.Publish(conf.MQTT.Topic+"/"+vdev.DeviceName+"/"+key, 0, true, fmt.Sprint(element))
 			token.Wait()
 		}
