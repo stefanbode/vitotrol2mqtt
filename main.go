@@ -12,8 +12,24 @@ import (
 	"github.com/maxatome/go-vitotrol"
 )
 
+var pConf *Config
+var pVitotrol *vitotrol.Session
+
 var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
-	fmt.Printf("Received message: %s from topic: %s\n", msg.Payload(), msg.Topic())
+	if pConf != nil {
+		var topicStructure = regexp.MustCompile(pConf.MQTT.Topic + `\/(.*?)\/(.*?)\/set`)
+		m := topicStructure.FindStringSubmatch(msg.Topic())
+
+		if m != nil {
+			fmt.Println(fmt.Sprintf("setting %s to %s", m[2], msg.Payload()))
+			for _, vdev := range pVitotrol.Devices {
+				if vdev.DeviceName == m[1] {
+					vdev.WriteData(pVitotrol, vitotrol.AttributesNames2IDs[m[2]], fmt.Sprintf("%s", msg.Payload()))
+				}
+			}
+		}
+	}
+
 }
 
 var connectHandler mqtt.OnConnectHandler = func(client mqtt.Client) {
@@ -32,7 +48,7 @@ func VitotrolInit(vconf *ConfigVitotrol) *vitotrol.Session {
 			time.Sleep(time.Duration(vconf.RetryTimeout) * time.Second)
 		}
 
-		pVitotrol := &vitotrol.Session{}
+		pVitotrol = &vitotrol.Session{}
 
 		fmt.Println("Vitotrol login...")
 		err = pVitotrol.Login(vconf.Login, vconf.Password)
@@ -71,10 +87,10 @@ var customAttr = regexp.MustCompile(
 	`^([a-zA-Z0-9_]+)[-_]0x([a-fA-F0-9]{1,4})\z`)
 
 func handleDevices(conf *Config, pVitotrol *vitotrol.Session, mqttClient mqtt.Client) bool {
-
+	atLeastOneOK := false
 	for _, vdev := range pVitotrol.Devices {
 
-		fmt.Fprintf(os.Stderr, "Refreshing data for device: %s\n", vdev.DeviceName)
+		//fmt.Fprintf(os.Stderr, "Refreshing data for device: %s\n", vdev.DeviceName)
 
 		if !vdev.IsConnected {
 			continue
@@ -96,6 +112,8 @@ func handleDevices(conf *Config, pVitotrol *vitotrol.Session, mqttClient mqtt.Cl
 			fmt.Fprintf(os.Stderr, "RefreshData failed: %s\n", err)
 			continue
 		}
+
+		atLeastOneOK = true
 
 		err = vdev.GetData(pVitotrol, cdev.attrs)
 		if err != nil {
@@ -125,7 +143,7 @@ func handleDevices(conf *Config, pVitotrol *vitotrol.Session, mqttClient mqtt.Cl
 
 	}
 
-	return true
+	return atLeastOneOK
 }
 
 func main() {
@@ -142,9 +160,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Cannot read config: %s\n", err)
 		os.Exit(1)
 	}
+	pConf = conf
 
 	// Resolve fields
-	for _, cdev := range conf.Devices {
+	for _, cdev := range pConf.Devices {
 		attrs := make(map[vitotrol.AttrID]struct{}, len(cdev.Fields))
 
 		for _, fieldName := range cdev.Fields {
@@ -193,26 +212,32 @@ func main() {
 	}
 
 	// Create a new MQTT Client
+
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker("tcp://192.168.3.250:1883")
-	opts.SetClientID(conf.MQTT.ClientID)
-	opts.SetUsername(conf.MQTT.Login)
-	opts.SetPassword(conf.MQTT.Password)
-	opts.SetDefaultPublishHandler(messagePubHandler)
+	opts.SetClientID(pConf.MQTT.ClientID)
+	opts.SetUsername(pConf.MQTT.Login)
+	opts.SetPassword(pConf.MQTT.Password)
+	opts.SetAutoReconnect(true)
 	opts.OnConnect = connectHandler
 	opts.OnConnectionLost = connectLostHandler
 	mqttClient := mqtt.NewClient(opts)
 	if token := mqttClient.Connect(); token.Wait() && token.Error() != nil {
 		panic(token.Error())
 	}
+	//subscribe to the topic to catch the control commands
+	topic := pConf.MQTT.Topic + "/#"
+	token := mqttClient.Subscribe(topic, 1, messagePubHandler)
+	token.Wait()
 
 newVitotrol:
 	for {
-		pVitotrol := VitotrolInit(&conf.Vitotrol)
+		pVitotrol := VitotrolInit(&pConf.Vitotrol)
 
 		for {
-			if !handleDevices(conf, pVitotrol, mqttClient) {
-				time.Sleep(time.Duration(conf.Vitotrol.RetryTimeout) * time.Second)
+			if !handleDevices(pConf, pVitotrol, mqttClient) {
+				time.Sleep(time.Duration(pConf.Vitotrol.RetryTimeout) * time.Second)
+
 				continue newVitotrol
 			}
 		}
