@@ -21,12 +21,21 @@ var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Me
 		m := topicStructure.FindStringSubmatch(msg.Topic())
 
 		if m != nil {
-			fmt.Println(fmt.Sprintf("setting %s to %s", m[2], msg.Payload()))
-			for _, vdev := range pVitotrol.Devices {
-				if vdev.DeviceName == m[1] {
-					vdev.WriteData(pVitotrol, vitotrol.AttributesNames2IDs[m[2]], fmt.Sprintf("%s", msg.Payload()))
+			attrId := vitotrol.AttributesNames2IDs[m[2]]
+			value := fmt.Sprintf("%s", msg.Payload())
+
+			if vitotrol.AttributesRef[attrId].Access == vitotrol.ReadWrite {
+				fmt.Println(fmt.Sprintf("Setting %s to %s", m[2], value))
+				for _, vdev := range pVitotrol.Devices {
+					if vdev.DeviceName == m[1] {
+
+						vdev.WriteData(pVitotrol, attrId, value)
+					}
 				}
+			} else {
+				fmt.Println(fmt.Sprintf("Cannot set readonly attribute %s to %s", m[2], value))
 			}
+
 		}
 	}
 
