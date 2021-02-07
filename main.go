@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -14,31 +15,46 @@ import (
 
 var pConf *Config
 var pVitotrol *vitotrol.Session
+var mqttClient mqtt.Client
+
+var customAttrRegEx = regexp.MustCompile(
+	`^([a-zA-Z0-9_]+)[-_]0x([a-fA-F0-9]{1,4})\z`)
+
+func updateDeviceAttr(deviceName string, attrName string, value string) {
+
+	attrId := vitotrol.AttributesNames2IDs[attrName]
+
+	if vitotrol.AttributesRef[attrId].Access == vitotrol.ReadWrite {
+		fmt.Println(fmt.Sprintf("Setting %s to %s", attrName, value))
+		for _, vdev := range pVitotrol.Devices {
+			if vdev.DeviceName == deviceName {
+				ch, err := vdev.WriteDataWait(pVitotrol, attrId, value)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "WriteData error: %s\n", err)
+					continue
+				}
+				if err = <-ch; err != nil {
+					fmt.Fprintf(os.Stderr, "WriteData failed: %s\n", err)
+					continue
+				}
+
+				refreshDevice(&vdev, []vitotrol.AttrID{attrId})
+			}
+		}
+	} else {
+		fmt.Println(fmt.Sprintf("Cannot set readonly attribute %s to %s", attrName, value))
+	}
+}
 
 var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
 	if pConf != nil {
-		var topicStructure = regexp.MustCompile(pConf.MQTT.Topic + `\/(.*?)\/(.*?)\/set`)
-		m := topicStructure.FindStringSubmatch(msg.Topic())
+		var topicRegEx = regexp.MustCompile(pConf.MQTT.Topic + `\/(.*?)\/(.*?)\/set`)
+		m := topicRegEx.FindStringSubmatch(msg.Topic())
 
 		if m != nil {
-			attrId := vitotrol.AttributesNames2IDs[m[2]]
-			value := fmt.Sprintf("%s", msg.Payload())
-
-			if vitotrol.AttributesRef[attrId].Access == vitotrol.ReadWrite {
-				fmt.Println(fmt.Sprintf("Setting %s to %s", m[2], value))
-				for _, vdev := range pVitotrol.Devices {
-					if vdev.DeviceName == m[1] {
-
-						vdev.WriteData(pVitotrol, attrId, value)
-					}
-				}
-			} else {
-				fmt.Println(fmt.Sprintf("Cannot set readonly attribute %s to %s", m[2], value))
-			}
-
+			updateDeviceAttr(m[1], m[2], string(msg.Payload()))
 		}
 	}
-
 }
 
 var connectHandler mqtt.OnConnectHandler = func(client mqtt.Client) {
@@ -92,102 +108,84 @@ func getAttrValue(vdev *vitotrol.Device, attrID vitotrol.AttrID) (value interfac
 	return
 }
 
-var customAttr = regexp.MustCompile(
-	`^([a-zA-Z0-9_]+)[-_]0x([a-fA-F0-9]{1,4})\z`)
+func refreshDevice(device *vitotrol.Device, attrs []vitotrol.AttrID) bool {
+	ch, err := device.RefreshDataWait(pVitotrol, attrs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "RefreshData error: %s\n", err)
+		return false
+	}
+	if err = <-ch; err != nil {
+		fmt.Fprintf(os.Stderr, "RefreshData failed: %s\n", err)
+		return false
+	}
 
-func handleDevices(conf *Config, pVitotrol *vitotrol.Session, mqttClient mqtt.Client) bool {
-	atLeastOneOK := false
-	for _, vdev := range pVitotrol.Devices {
+	err = device.GetData(pVitotrol, attrs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "GetData error: %s\n", err)
+		return false
+	}
 
-		//fmt.Fprintf(os.Stderr, "Refreshing data for device: %s\n", vdev.DeviceName)
+	fields := map[string]interface{}{}
 
-		if !vdev.IsConnected {
-			continue
+	for _, attrID := range attrs {
+		fields[vitotrol.AttributesRef[attrID].Name] =
+			getAttrValue(device, attrID)
+	}
+
+	// Write the batch
+	values, _ := json.Marshal(fields)
+	fmt.Sprintln("%", values)
+	for key, element := range fields {
+		token := mqttClient.Publish(pConf.MQTT.Topic+"/"+device.DeviceName+"/"+key, 0, true, fmt.Sprint(element))
+		token.Wait()
+	}
+
+	return true
+}
+
+func refreshDevices() bool {
+	for _, device := range pVitotrol.Devices {
+
+		//fmt.Fprintf(os.Stderr, "Refreshing data for device: %s\n", device.DeviceName)
+
+		if !device.IsConnected {
+			return false
 		}
 
 		// Check if this device has a configuration
-		cdev := conf.GetConfigDevice(vdev.DeviceName, vdev.LocationName)
-		if cdev == nil {
-			continue
+		deviceConfig := pConf.GetConfigDevice(device.DeviceName, device.LocationName)
+		if deviceConfig == nil {
+			return false
 		}
 
-		ch, err := vdev.RefreshDataWait(pVitotrol, cdev.attrs)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "RefreshData error: %s\n", err)
-			continue
+		if !refreshDevice(&device, deviceConfig.attrs) {
+			return false
 		}
 
-		if err = <-ch; err != nil {
-			fmt.Fprintf(os.Stderr, "RefreshData failed: %s\n", err)
-			continue
-		}
-
-		atLeastOneOK = true
-
-		err = vdev.GetData(pVitotrol, cdev.attrs)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "GetData error: %s\n", err)
-			continue
-		}
-
-		fields := map[string]interface{}{}
-
-		for _, attrID := range cdev.attrs {
-			fields[vitotrol.AttributesRef[attrID].Name] =
-				getAttrValue(&vdev, attrID)
-		}
-
-		// Computed attrs
-		for _, fieldName := range cdev.computedFields {
-			fields[fieldName] = computedAttrs[fieldName].Compute(&vdev)
-		}
-
-		// Write the batch
-		for key, element := range fields {
-			token := mqttClient.Publish(conf.MQTT.Topic+"/"+vdev.DeviceName+"/"+key, 0, true, fmt.Sprint(element))
-			token.Wait()
-		}
-
-		time.Sleep(time.Duration(conf.Vitotrol.Frequency) * time.Second)
+		time.Sleep(time.Duration(pConf.Vitotrol.Frequency) * time.Second)
 
 	}
-
-	return atLeastOneOK
+	return true
 }
 
-func main() {
-	configFile := flag.String("config", "", "config file")
+func resolveFields() {
+	for _, configDevice := range pConf.Devices {
+		attrs := make(map[vitotrol.AttrID]struct{}, len(configDevice.Fields))
 
-	flag.Parse()
-
-	if *configFile == "" {
-		fmt.Fprintln(os.Stderr, "config file is missing")
-		os.Exit(1)
-	}
-	conf, err := ReadConfig(*configFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Cannot read config: %s\n", err)
-		os.Exit(1)
-	}
-	pConf = conf
-
-	// Resolve fields
-	for _, cdev := range pConf.Devices {
-		attrs := make(map[vitotrol.AttrID]struct{}, len(cdev.Fields))
-
-		for _, fieldName := range cdev.Fields {
+		for _, fieldName := range configDevice.Fields {
 			// Computed attribute
-			if cattr, ok := computedAttrs[fieldName]; ok {
-				for _, attrID := range cattr.Attrs {
+			if computedAttr, ok := computedAttrs[fieldName]; ok {
+				for _, attrID := range computedAttr.Attrs {
 					attrs[attrID] = struct{}{}
 				}
-				cdev.computedFields = append(cdev.computedFields, fieldName)
+				configDevice.computedFields = append(configDevice.computedFields, fieldName)
 			} else {
 				// Already known attribute
 				attrID, ok := vitotrol.AttributesNames2IDs[fieldName]
 				if !ok {
 					// Custom attribute
-					m := customAttr.FindStringSubmatch(fieldName)
+
+					m := customAttrRegEx.FindStringSubmatch(fieldName)
 					if m == nil {
 						fmt.Fprintf(os.Stderr, "Unknown attribute `%s'\n", fieldName)
 						os.Exit(1)
@@ -210,18 +208,18 @@ func main() {
 
 		if len(attrs) == 0 {
 			fmt.Fprintf(os.Stderr, "No attributes for device %s/location %s\n",
-				cdev.Name, cdev.Location)
+				configDevice.Name, configDevice.Location)
 			os.Exit(1)
 		}
 
-		cdev.attrs = make([]vitotrol.AttrID, 0, len(attrs))
+		configDevice.attrs = make([]vitotrol.AttrID, 0, len(attrs))
 		for attrID := range attrs {
-			cdev.attrs = append(cdev.attrs, attrID)
+			configDevice.attrs = append(configDevice.attrs, attrID)
 		}
 	}
+}
 
-	// Create a new MQTT Client
-
+func initializeMQTTClient() {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker("tcp://192.168.3.250:1883")
 	opts.SetClientID(pConf.MQTT.ClientID)
@@ -230,7 +228,8 @@ func main() {
 	opts.SetAutoReconnect(true)
 	opts.OnConnect = connectHandler
 	opts.OnConnectionLost = connectLostHandler
-	mqttClient := mqtt.NewClient(opts)
+	mqttClient = mqtt.NewClient(opts)
+
 	if token := mqttClient.Connect(); token.Wait() && token.Error() != nil {
 		panic(token.Error())
 	}
@@ -238,17 +237,44 @@ func main() {
 	topic := pConf.MQTT.Topic + "/#"
 	token := mqttClient.Subscribe(topic, 1, messagePubHandler)
 	token.Wait()
+}
 
-newVitotrol:
+func mainLoop() {
 	for {
-		pVitotrol := VitotrolInit(&pConf.Vitotrol)
+		pVitotrol = VitotrolInit(&pConf.Vitotrol)
 
 		for {
-			if !handleDevices(pConf, pVitotrol, mqttClient) {
+			if !refreshDevices() {
 				time.Sleep(time.Duration(pConf.Vitotrol.RetryTimeout) * time.Second)
 
-				continue newVitotrol
+				continue
 			}
 		}
 	}
+}
+
+func main() {
+	//read configuration
+	configFile := flag.String("config", "", "config file")
+
+	flag.Parse()
+
+	if *configFile == "" {
+		fmt.Fprintln(os.Stderr, "config file is missing")
+		os.Exit(1)
+	}
+	conf, err := ReadConfig(*configFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot read config: %s\n", err)
+		os.Exit(1)
+	}
+	pConf = conf
+
+	// Resolve fields
+	resolveFields()
+
+	// Create a new MQTT Client
+	initializeMQTTClient()
+
+	mainLoop()
 }
