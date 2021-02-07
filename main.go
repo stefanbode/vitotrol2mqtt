@@ -37,8 +37,9 @@ func updateDeviceAttr(deviceName string, attrName string, value string) {
 					fmt.Fprintf(os.Stderr, "WriteData failed: %s\n", err)
 					continue
 				}
-
-				refreshDevice(&vdev, []vitotrol.AttrID{attrId})
+				// update MQTT with the new value
+				token := mqttClient.Publish(pConf.MQTT.Topic+"/"+vdev.DeviceName+"/"+attrName, 0, true, value)
+				token.Wait()
 			}
 		}
 	} else {
