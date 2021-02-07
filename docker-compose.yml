@@ -1,0 +1,5 @@
+vitotrol:
+  build: .
+  volumes:
+    - ./vitotrol2mqtt.yml:/root/go/vitotrol2mqtt.yml
+  restart: unless-stopped
