@@ -45,5 +45,12 @@ Once your `vitotrol2mqtt.yml` is ready, you can launch:
 ```sh
 vitotrol2mqtt -config vitotrol2mqtt.yml
 ```
+## Docker
+Alternatively, you can run the tool in a docker container.
+
+```sh
+docker-compose build --no-cache
+docker-compose up 
+```
 
 That's all.
