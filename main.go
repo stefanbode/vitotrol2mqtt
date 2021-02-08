@@ -31,11 +31,11 @@ func updateDeviceAttr(deviceName string, attrName string, value string) {
 				ch, err := vdev.WriteDataWait(pVitotrol, attrId, value)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "WriteData error: %s\n", err)
-					continue
+					break
 				}
 				if err = <-ch; err != nil {
 					fmt.Fprintf(os.Stderr, "WriteData failed: %s\n", err)
-					continue
+					break
 				}
 				// update MQTT with the new value
 				token := mqttClient.Publish(pConf.MQTT.Topic+"/"+vdev.DeviceName+"/"+attrName, 0, true, value)
@@ -247,8 +247,7 @@ func mainLoop() {
 		for {
 			if !refreshDevices() {
 				time.Sleep(time.Duration(pConf.Vitotrol.RetryTimeout) * time.Second)
-
-				continue
+				break
 			}
 		}
 	}
