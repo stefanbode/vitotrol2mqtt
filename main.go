@@ -31,11 +31,11 @@ func updateDeviceAttr(deviceName string, attrName string, value string) {
 				ch, err := vdev.WriteDataWait(pVitotrol, attrId, value)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "WriteData error: %s\n", err)
-					break
+					os.Exit(1)
 				}
 				if err = <-ch; err != nil {
 					fmt.Fprintf(os.Stderr, "WriteData failed: %s\n", err)
-					break
+					os.Exit(1)
 				}
 				// update MQTT with the new value
 				token := mqttClient.Publish(pConf.MQTT.Topic+"/"+vdev.DeviceName+"/"+attrName, 0, true, value)
@@ -59,39 +59,36 @@ var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Me
 }
 
 var connectHandler mqtt.OnConnectHandler = func(client mqtt.Client) {
-	fmt.Println("Connected")
+	fmt.Println("MQTT Connected")
 }
 
 var connectLostHandler mqtt.ConnectionLostHandler = func(client mqtt.Client, err error) {
-	fmt.Printf("Connect lost: %v", err)
+	fmt.Printf("MQTT Connect lost: %v", err)
+	os.Exit(1)
 }
 
 func VitotrolInit(vconf *ConfigVitotrol) *vitotrol.Session {
-	var err error
 	for {
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\nSleeping before retrying...\n", err)
-			time.Sleep(time.Duration(vconf.RetryTimeout) * time.Second)
-		}
-
 		pVitotrol = &vitotrol.Session{}
 
 		fmt.Println("Vitotrol login...")
-		err = pVitotrol.Login(vconf.Login, vconf.Password)
+		err := pVitotrol.Login(vconf.Login, vconf.Password)
 		if err != nil {
 			err = fmt.Errorf("Login failed: %s", err)
-			continue
+			os.Exit(1)
+
 		}
 
 		fmt.Println("Vitotrol GetDevices...")
 		err = pVitotrol.GetDevices()
 		if err != nil {
 			err = fmt.Errorf("GetDevices failed: %s", err)
-			continue
+			os.Exit(1)
 		}
 		if len(pVitotrol.Devices) == 0 {
 			err = fmt.Errorf("No device found")
-			continue
+			os.Exit(1)
+
 		}
 		fmt.Printf("%d device(s) found\n", len(pVitotrol.Devices))
 		return pVitotrol
@@ -113,17 +110,17 @@ func refreshDevice(device *vitotrol.Device, attrs []vitotrol.AttrID) bool {
 	ch, err := device.RefreshDataWait(pVitotrol, attrs)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "RefreshData error: %s\n", err)
-		return false
+		os.Exit(1)
 	}
 	if err = <-ch; err != nil {
 		fmt.Fprintf(os.Stderr, "RefreshData failed: %s\n", err)
-		return false
+		os.Exit(1)
 	}
 
 	err = device.GetData(pVitotrol, attrs)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "GetData error: %s\n", err)
-		return false
+		os.Exit(1)
 	}
 
 	fields := map[string]interface{}{}
@@ -144,29 +141,16 @@ func refreshDevice(device *vitotrol.Device, attrs []vitotrol.AttrID) bool {
 	return true
 }
 
-func refreshDevices() bool {
+func refreshDevices() {
 	for _, device := range pVitotrol.Devices {
-
-		//fmt.Fprintf(os.Stderr, "Refreshing data for device: %s\n", device.DeviceName)
-
-		if !device.IsConnected {
-			return false
-		}
-
 		// Check if this device has a configuration
 		deviceConfig := pConf.GetConfigDevice(device.DeviceName, device.LocationName)
 		if deviceConfig == nil {
-			return false
+			refreshDevice(&device, deviceConfig.attrs)
 		}
-
-		if !refreshDevice(&device, deviceConfig.attrs) {
-			return false
-		}
-
 		time.Sleep(time.Duration(pConf.Vitotrol.Frequency) * time.Second)
 
 	}
-	return true
 }
 
 func resolveFields() {
@@ -222,7 +206,7 @@ func resolveFields() {
 
 func initializeMQTTClient() {
 	opts := mqtt.NewClientOptions()
-	opts.AddBroker("tcp://192.168.3.250:1883")
+	opts.AddBroker("tcp://" + pConf.MQTT.Broker + ":" + pConf.MQTT.Port)
 	opts.SetClientID(pConf.MQTT.ClientID)
 	opts.SetUsername(pConf.MQTT.Login)
 	opts.SetPassword(pConf.MQTT.Password)
@@ -241,15 +225,10 @@ func initializeMQTTClient() {
 }
 
 func mainLoop() {
-	for {
-		pVitotrol = VitotrolInit(&pConf.Vitotrol)
+	pVitotrol = VitotrolInit(&pConf.Vitotrol)
 
-		for {
-			if !refreshDevices() {
-				time.Sleep(time.Duration(pConf.Vitotrol.RetryTimeout) * time.Second)
-				break
-			}
-		}
+	for {
+		refreshDevices()
 	}
 }
 
