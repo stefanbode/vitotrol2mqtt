@@ -145,7 +145,7 @@ func refreshDevices() {
 	for _, device := range pVitotrol.Devices {
 		// Check if this device has a configuration
 		deviceConfig := pConf.GetConfigDevice(device.DeviceName, device.LocationName)
-		if deviceConfig == nil {
+		if device.IsConnected && deviceConfig != nil {
 			refreshDevice(&device, deviceConfig.attrs)
 		}
 		time.Sleep(time.Duration(pConf.Vitotrol.Frequency) * time.Second)
