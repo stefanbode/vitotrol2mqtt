@@ -21,11 +21,11 @@ var customAttrRegEx = regexp.MustCompile(
 	`^([a-zA-Z0-9_]+)[-_]0x([a-fA-F0-9]{1,4})\z`)
 
 func updateDeviceAttr(deviceName string, attrName string, value string) {
+	attrId, ok := vitotrol.AttributesNames2IDs[attrName]
 
-	attrId := vitotrol.AttributesNames2IDs[attrName]
-
-	if vitotrol.AttributesRef[attrId].Access == vitotrol.ReadWrite {
+	if ok && vitotrol.AttributesRef[attrId].Access == vitotrol.ReadWrite {
 		fmt.Println(fmt.Sprintf("Setting %s to %s", attrName, value))
+		ok = false
 		for _, vdev := range pVitotrol.Devices {
 			if vdev.DeviceName == deviceName {
 				ch, err := vdev.WriteDataWait(pVitotrol, attrId, value)
@@ -38,18 +38,24 @@ func updateDeviceAttr(deviceName string, attrName string, value string) {
 					os.Exit(1)
 				}
 				// update MQTT with the new value
-				token := mqttClient.Publish(pConf.MQTT.Topic+"/"+vdev.DeviceName+"/"+attrName, 0, true, value)
+				token := mqttClient.Publish(pConf.MQTT.Topic+"/"+vdev.DeviceName+"/"+attrName, 0, false, value)
 				token.Wait()
+				ok = true
+				break
 			}
 		}
 	} else {
-		fmt.Println(fmt.Sprintf("Cannot set readonly attribute %s to %s", attrName, value))
+		ok = false
+	}
+
+	if !ok {
+		fmt.Println(fmt.Sprintf("Device %s: cannot set attribute %s to %s", deviceName, attrName, value))
 	}
 }
 
 var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
 	if pConf != nil {
-		var topicRegEx = regexp.MustCompile(pConf.MQTT.Topic + `\/(.*?)\/(.*?)\/set`)
+		var topicRegEx = regexp.MustCompile(pConf.MQTT.Topic + `\/(.*?)\/([^/]*?)\/set`)
 		m := topicRegEx.FindStringSubmatch(msg.Topic())
 
 		if m != nil {
@@ -134,7 +140,7 @@ func refreshDevice(device *vitotrol.Device, attrs []vitotrol.AttrID) bool {
 	values, _ := json.Marshal(fields)
 	fmt.Sprintln("%", values)
 	for key, element := range fields {
-		token := mqttClient.Publish(pConf.MQTT.Topic+"/"+device.DeviceName+"/"+key, 0, true, fmt.Sprint(element))
+		token := mqttClient.Publish(pConf.MQTT.Topic+"/"+device.DeviceName+"/"+key, 0, false, fmt.Sprint(element))
 		token.Wait()
 	}
 
@@ -142,14 +148,25 @@ func refreshDevice(device *vitotrol.Device, attrs []vitotrol.AttrID) bool {
 }
 
 func refreshDevices() {
-	for _, device := range pVitotrol.Devices {
-		// Check if this device has a configuration
-		deviceConfig := pConf.GetConfigDevice(device.DeviceName, device.LocationName)
-		if device.IsConnected && deviceConfig != nil {
-			refreshDevice(&device, deviceConfig.attrs)
+	for {
+		start := time.Now()
+		for _, device := range pVitotrol.Devices {
+			// Check if this device has a configuration
+			deviceConfig := pConf.GetConfigDevice(device.DeviceName, device.LocationName)
+			if deviceConfig != nil {
+				if device.IsConnected {
+					refreshDevice(&device, deviceConfig.attrs)
+				} else {
+					// Device is not connect - retry.
+					fmt.Fprintf(os.Stderr, "Device is not connected `%s'\n", device.DeviceName);
+					os.Exit(1)
+				}
+			}
 		}
-		time.Sleep(time.Duration(pConf.Vitotrol.Frequency) * time.Second)
-
+		delta := time.Duration(pConf.Vitotrol.Frequency) * time.Second - time.Now().Sub(start)
+		if delta > 0 {
+			time.Sleep(delta)
+		}
 	}
 }
 
