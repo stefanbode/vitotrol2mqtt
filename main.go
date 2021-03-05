@@ -227,7 +227,7 @@ func initializeMQTTClient() {
 	opts.SetClientID(pConf.MQTT.ClientID)
 	opts.SetUsername(pConf.MQTT.Login)
 	opts.SetPassword(pConf.MQTT.Password)
-	opts.SetAutoReconnect(true)
+	opts.SetAutoReconnect(false)
 	opts.OnConnect = connectHandler
 	opts.OnConnectionLost = connectLostHandler
 	mqttClient = mqtt.NewClient(opts)
