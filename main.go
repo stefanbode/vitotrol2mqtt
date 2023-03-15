@@ -149,6 +149,9 @@ func refreshDevice(device *vitotrol.Device, attrs []vitotrol.AttrID) bool {
 
 func refreshDevices() {
 	for {
+		pVitotrol = VitotrolInit(&pConf.Vitotrol)
+		fmt.Println("Refreshing fields...")
+
 		start := time.Now()
 		for _, device := range pVitotrol.Devices {
 			// Check if this device has a configuration
@@ -158,12 +161,12 @@ func refreshDevices() {
 					refreshDevice(&device, deviceConfig.attrs)
 				} else {
 					// Device is not connect - retry.
-					fmt.Fprintf(os.Stderr, "Device is not connected `%s'\n", device.DeviceName);
+					fmt.Fprintf(os.Stderr, "Device is not connected `%s'\n", device.DeviceName)
 					os.Exit(1)
 				}
 			}
 		}
-		delta := time.Duration(pConf.Vitotrol.Frequency) * time.Second - time.Now().Sub(start)
+		delta := time.Duration(pConf.Vitotrol.Frequency)*time.Second - time.Since(start)
 		if delta > 0 {
 			time.Sleep(delta)
 		}
@@ -242,8 +245,6 @@ func initializeMQTTClient() {
 }
 
 func mainLoop() {
-	pVitotrol = VitotrolInit(&pConf.Vitotrol)
-
 	for {
 		refreshDevices()
 	}
