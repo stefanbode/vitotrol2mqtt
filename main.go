@@ -21,6 +21,8 @@ var customAttrRegEx = regexp.MustCompile(
 	`^([a-zA-Z0-9_]+)[-_]0x([a-fA-F0-9]{1,4})\z`)
 
 func updateDeviceAttr(deviceName string, attrName string, value string) {
+	VitotrolInit()
+
 	attrId, ok := vitotrol.AttributesNames2IDs[attrName]
 
 	if ok && vitotrol.AttributesRef[attrId].Access == vitotrol.ReadWrite {
@@ -73,32 +75,27 @@ var connectLostHandler mqtt.ConnectionLostHandler = func(client mqtt.Client, err
 	os.Exit(1)
 }
 
-func VitotrolInit(vconf *ConfigVitotrol) *vitotrol.Session {
-	for {
-		pVitotrol = &vitotrol.Session{}
+func VitotrolInit() {
+	pVitotrol = &vitotrol.Session{}
+	fmt.Println("Vitotrol login...")
+	err := pVitotrol.Login(pConf.Vitotrol.Login, pConf.Vitotrol.Password)
+	if err != nil {
+		err = fmt.Errorf("Login failed: %s", err)
+		os.Exit(1)
 
-		fmt.Println("Vitotrol login...")
-		err := pVitotrol.Login(vconf.Login, vconf.Password)
-		if err != nil {
-			err = fmt.Errorf("Login failed: %s", err)
-			os.Exit(1)
-
-		}
-
-		fmt.Println("Vitotrol GetDevices...")
-		err = pVitotrol.GetDevices()
-		if err != nil {
-			err = fmt.Errorf("GetDevices failed: %s", err)
-			os.Exit(1)
-		}
-		if len(pVitotrol.Devices) == 0 {
-			err = fmt.Errorf("No device found")
-			os.Exit(1)
-
-		}
-		fmt.Printf("%d device(s) found\n", len(pVitotrol.Devices))
-		return pVitotrol
 	}
+	fmt.Println("Vitotrol GetDevices...")
+	err = pVitotrol.GetDevices()
+	if err != nil {
+		err = fmt.Errorf("GetDevices failed: %s", err)
+		os.Exit(1)
+	}
+	if len(pVitotrol.Devices) == 0 {
+		err = fmt.Errorf("No device found")
+		os.Exit(1)
+
+	}
+	fmt.Printf("%d device(s) found\n", len(pVitotrol.Devices))
 }
 
 func getAttrValue(vdev *vitotrol.Device, attrID vitotrol.AttrID) (value interface{}) {
@@ -113,6 +110,7 @@ func getAttrValue(vdev *vitotrol.Device, attrID vitotrol.AttrID) (value interfac
 }
 
 func refreshDevice(device *vitotrol.Device, attrs []vitotrol.AttrID) bool {
+
 	ch, err := device.RefreshDataWait(pVitotrol, attrs)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "RefreshData error: %s\n", err)
@@ -148,28 +146,25 @@ func refreshDevice(device *vitotrol.Device, attrs []vitotrol.AttrID) bool {
 }
 
 func refreshDevices() {
-	for {
-		pVitotrol = VitotrolInit(&pConf.Vitotrol)
-		fmt.Println("Refreshing fields...")
+	fmt.Println("Refreshing fields...")
 
-		start := time.Now()
-		for _, device := range pVitotrol.Devices {
-			// Check if this device has a configuration
-			deviceConfig := pConf.GetConfigDevice(device.DeviceName, device.LocationName)
-			if deviceConfig != nil {
-				if device.IsConnected {
-					refreshDevice(&device, deviceConfig.attrs)
-				} else {
-					// Device is not connect - retry.
-					fmt.Fprintf(os.Stderr, "Device is not connected `%s'\n", device.DeviceName)
-					os.Exit(1)
-				}
+	start := time.Now()
+	for _, device := range pVitotrol.Devices {
+		// Check if this device has a configuration
+		deviceConfig := pConf.GetConfigDevice(device.DeviceName, device.LocationName)
+		if deviceConfig != nil {
+			if device.IsConnected {
+				refreshDevice(&device, deviceConfig.attrs)
+			} else {
+				// Device is not connect - retry.
+				fmt.Fprintf(os.Stderr, "Device is not connected `%s'\n", device.DeviceName)
+				os.Exit(1)
 			}
 		}
-		delta := time.Duration(pConf.Vitotrol.Frequency)*time.Second - time.Since(start)
-		if delta > 0 {
-			time.Sleep(delta)
-		}
+	}
+	delta := time.Duration(pConf.Vitotrol.Frequency)*time.Second - time.Since(start)
+	if delta > 0 {
+		time.Sleep(delta)
 	}
 }
 
@@ -246,6 +241,7 @@ func initializeMQTTClient() {
 
 func mainLoop() {
 	for {
+		VitotrolInit()
 		refreshDevices()
 	}
 }
