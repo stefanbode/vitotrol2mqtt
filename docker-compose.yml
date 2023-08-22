@@ -1,5 +1,7 @@
-vitotrol:
-  build: .
-  volumes:
-    - ./vitotrol2mqtt.yml:/vitotrol2mqtt.yml
-  restart: unless-stopped
+version: '2'
+services:
+  vitotrol:
+    build: .
+    volumes:
+      - ./vitotrol2mqtt.yml:/vitotrol2mqtt.yml
+    restart: unless-stopped
