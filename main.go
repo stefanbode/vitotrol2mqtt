@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -22,11 +23,10 @@ var customAttrRegEx = regexp.MustCompile(
 
 func updateDeviceAttr(deviceName string, attrName string, value string) {
 	VitotrolInit()
-
 	attrId, ok := vitotrol.AttributesNames2IDs[attrName]
 
 	if ok && vitotrol.AttributesRef[attrId].Access == vitotrol.ReadWrite {
-		fmt.Println(fmt.Sprintf("Setting %s to %s", attrName, value))
+		fmt.Printf("Setting %s to %s\n", attrName, value)
 		ok = false
 		for _, vdev := range pVitotrol.Devices {
 			if vdev.DeviceName == deviceName {
@@ -59,7 +59,6 @@ var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Me
 	if pConf != nil {
 		var topicRegEx = regexp.MustCompile(pConf.MQTT.Topic + `\/(.*?)\/([^/]*?)\/set`)
 		m := topicRegEx.FindStringSubmatch(msg.Topic())
-
 		if m != nil {
 			updateDeviceAttr(m[1], m[2], string(msg.Payload()))
 		}
@@ -67,7 +66,7 @@ var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Me
 }
 
 var connectHandler mqtt.OnConnectHandler = func(client mqtt.Client) {
-	fmt.Println("MQTT Connected")
+	fmt.Println("MQTT Connected. Stefan Bode")
 }
 
 var connectLostHandler mqtt.ConnectionLostHandler = func(client mqtt.Client, err error) {
@@ -110,7 +109,6 @@ func getAttrValue(vdev *vitotrol.Device, attrID vitotrol.AttrID) (value interfac
 }
 
 func refreshDevice(device *vitotrol.Device, attrs []vitotrol.AttrID) bool {
-
 	ch, err := device.RefreshDataWait(pVitotrol, attrs)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "RefreshData error: %s\n", err)
@@ -130,8 +128,7 @@ func refreshDevice(device *vitotrol.Device, attrs []vitotrol.AttrID) bool {
 	fields := map[string]interface{}{}
 
 	for _, attrID := range attrs {
-		fields[vitotrol.AttributesRef[attrID].Name] =
-			getAttrValue(device, attrID)
+		fields[vitotrol.AttributesRef[attrID].Name] = getAttrValue(device, attrID)
 	}
 
 	// Write the batch
@@ -191,10 +188,20 @@ func resolveFields() {
 						os.Exit(1)
 					}
 
+					tmpName := m[1]
+					access := vitotrol.ReadWrite
+
+					// TODO Better would be to do configDevice.GetTypeInfo and cache the result
+					// and check access against the real type mapping.
+					if strings.HasPrefix(tmpName, "RW") {
+						access = vitotrol.ReadWrite
+						fmt.Println(tmpName, " is writeable" )
+					}
+
 					attrRef := vitotrol.AttrRef{
 						Type:   vitotrol.TypeDouble,
-						Access: vitotrol.ReadOnly,
-						Name:   m[1],
+						Access: access,
+						Name:   tmpName,
 					}
 					tmpID, _ := strconv.ParseUint(m[2], 16, 16)
 					attrID = vitotrol.AttrID(tmpID)
@@ -234,7 +241,9 @@ func initializeMQTTClient() {
 		panic(token.Error())
 	}
 	//subscribe to the topic to catch the control commands
+	
 	topic := pConf.MQTT.Topic + "/#"
+	fmt.Println("MQTT Subscribe: ", topic)
 	token := mqttClient.Subscribe(topic, 1, messagePubHandler)
 	token.Wait()
 }

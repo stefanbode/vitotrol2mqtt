@@ -17,6 +17,7 @@ type ConfigMQTT struct {
 }
 
 type ConfigVitotrol struct {
+	Debug        bool   `yaml:"debug"`
 	Login        string `yaml:"login"`
 	Password     string `yaml:"password"`
 	RetryTimeout uint   `yaml:"retry_timeout"`
