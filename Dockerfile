@@ -1,6 +1,6 @@
-FROM golang:1.15 AS builder
+FROM golang:1.19 AS builder
 
-RUN CGO_ENABLED=0 GOOS=linux go get -u -a -tags netgo -ldflags '-w -extldflags "-static"' github.com/benvanmierloo/vitotrol2mqtt
+RUN CGO_ENABLED=0 GOOS=linux go install -ldflags '-w -extldflags "-static"' github.com/benvanmierloo/vitotrol2mqtt@latest
 
 FROM alpine:3.13.2
 
