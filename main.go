@@ -66,7 +66,7 @@ var messagePubHandler mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Me
 }
 
 var connectHandler mqtt.OnConnectHandler = func(client mqtt.Client) {
-	fmt.Println("MQTT Connected. Stefan Bode")
+	fmt.Println("MQTT Connected.")
 }
 
 var connectLostHandler mqtt.ConnectionLostHandler = func(client mqtt.Client, err error) {
@@ -195,7 +195,7 @@ func resolveFields() {
 					// and check access against the real type mapping.
 					if strings.HasPrefix(tmpName, "RW") {
 						access = vitotrol.ReadWrite
-						fmt.Println(tmpName, " is writeable" )
+						fmt.Println(tmpName, " is writeable")
 					}
 
 					attrRef := vitotrol.AttrRef{
@@ -241,7 +241,7 @@ func initializeMQTTClient() {
 		panic(token.Error())
 	}
 	//subscribe to the topic to catch the control commands
-	
+
 	topic := pConf.MQTT.Topic + "/#"
 	fmt.Println("MQTT Subscribe: ", topic)
 	token := mqttClient.Subscribe(topic, 1, messagePubHandler)
